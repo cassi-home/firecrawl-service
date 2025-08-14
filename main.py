@@ -290,9 +290,15 @@ async def find_property_urls_simple(app: FirecrawlApp, address: str, city: str =
     
     print(f"{BLUE}Using Firecrawl search to find property URLs for: {full_address}{ENDC}")
     
-    # Search each site using Firecrawl's search API
-    for site, queries in search_queries.items():
+    # Search sites with priority: Zillow first, then Redfin only if needed
+    sites_priority = ["zillow", "redfin"]
+    
+    for site in sites_priority:
+        if site not in search_queries:
+            continue
+            
         print(f"{BLUE}Searching for {site.title()} listings{ENDC}")
+        queries = search_queries[site]
         
         for query in queries:
             try:
@@ -346,6 +352,11 @@ async def find_property_urls_simple(app: FirecrawlApp, address: str, city: str =
                 error_msg = f"Error searching {site} with query '{query}': {str(e)}"
                 found_urls["errors"].append(error_msg)
                 print(f"{RED}  {error_msg}{ENDC}")
+        
+        # Early exit optimization: If Zillow found valid URLs, skip Redfin
+        if site == "zillow" and found_urls["zillow"]:
+            print(f"{GREEN}✓ Zillow found {len(found_urls['zillow'])} valid URLs, skipping Redfin search to avoid rate limits{ENDC}")
+            break
     
     # Summary
     total_found = len(found_urls["zillow"]) + len(found_urls["redfin"])
