@@ -1,0 +1,21 @@
+[project]
+name = "firecrawl-service"
+version = "0.1.0"
+description = "Firecrawl service for extracting home information from real estate websites"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.115.12",
+    "gunicorn>=21.2.0",
+    "httpx==0.26.0",
+    "firecrawl-py>=1.0.0",
+    "opentelemetry-instrumentation-fastapi>=0.52b1",
+    "opentelemetry-instrumentation-httpx>=0.42b0",
+    "opentelemetry-exporter-otlp>=1.31.1",
+    "opentelemetry-sdk>=1.21.0",
+    "prometheus-fastapi-instrumentator>=7.1.0",
+    "pydantic>=2.11.4",
+    "pydantic-core>=2.33.2",
+    "python-dotenv==1.0.1",
+    "uvicorn>=0.34.0",
+]
