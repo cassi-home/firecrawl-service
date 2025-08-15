@@ -23,7 +23,8 @@ from config import (
 )
 from cache import (
     get_cached_result, cache_search_result, get_cache_stats, clear_cache as clear_search_cache,
-    cleanup_expired_entries, get_cache_health_report
+    cleanup_expired_entries, get_cache_health_report,
+    get_cached_extraction_result, cache_extraction_result
 )
 from credit_tracker import CreditTracker, global_monitor, estimate_monthly_usage
 from property_extraction import (
@@ -291,6 +292,14 @@ async def extract_home_info_with_quality_check(request: HomeInfoRequest) -> Prop
     
     with RequestMonitor(endpoint):
         try:
+            # STEP 0: Check extraction cache first (for instant responses)
+            cached_property_info = get_cached_extraction_result(
+                request.address, request.city, request.state, request.zip_code
+            )
+            if cached_property_info is not None:
+                # Convert dict back to PropertyInfo object
+                return PropertyInfo(**cached_property_info)
+            
             # Initialize Firecrawl client
             firecrawl_api_key = get_firecrawl_api_key()
             app = FirecrawlApp(api_key=firecrawl_api_key)
@@ -365,6 +374,12 @@ async def extract_home_info_with_quality_check(request: HomeInfoRequest) -> Prop
                     print(f"{Colors.GREEN}✓ Backup search improved quality from {extraction_quality:.1f}% to {final_quality:.1f}%{Colors.END}")
                 else:
                     print(f"{Colors.RED}No backup URL found, using initial extraction{Colors.END}")
+            
+            # Cache the extraction results for future requests
+            cache_extraction_result(
+                final_property_info.model_dump(), 
+                request.address, request.city, request.state, request.zip_code
+            )
             
             return final_property_info
             
