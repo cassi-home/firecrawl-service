@@ -27,9 +27,14 @@ from config import CACHE_EXPIRY_HOURS, Colors
 # 4. SHARED STATE: Works across async functions and multiple concurrent requests.
 # ==================================================================================
 
-# Global in-memory cache - stores search results to prevent duplicate API calls
+# Global in-memory caches
+# SEARCH_CACHE: stores URL discovery results to prevent duplicate searches
 # Structure: {cache_key: {'data': search_results, 'timestamp': datetime_created}}
 SEARCH_CACHE: Dict[str, Dict[str, Any]] = {}
+
+# EXTRACTION_CACHE: stores property extraction results to prevent duplicate extractions
+# Structure: {cache_key: {'data': PropertyInfo, 'timestamp': datetime_created}}
+EXTRACTION_CACHE: Dict[str, Dict[str, Any]] = {}
 
 def get_cache_key(address: str, city: str = None, state: str = None, zip_code: str = None) -> str:
     """
@@ -137,79 +142,178 @@ def cache_search_result(
     
     print(f"{Colors.GREEN}✓ Cached search results for future requests{Colors.END}")
 
+# ==================================================================================
+# EXTRACTION RESULT CACHING FUNCTIONS
+# ==================================================================================
+
+def get_cached_extraction_result(address: str, city: str = None, state: str = None, zip_code: str = None) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve cached property extraction result if available and valid.
+    
+    Args:
+        address: Street address
+        city: City name (optional)
+        state: State abbreviation (optional)
+        zip_code: ZIP code (optional)
+        
+    Returns:
+        Cached PropertyInfo dict if valid, None if not found or expired
+    """
+    cache_key = get_cache_key(address, city, state, zip_code)
+    
+    if cache_key in EXTRACTION_CACHE:
+        cache_entry = EXTRACTION_CACHE[cache_key]
+        if is_cache_valid(cache_entry):
+            print(f"{Colors.GREEN}✓ EXTRACTION Cache HIT - returning cached property data (0 credits used){Colors.END}")
+            return cache_entry['data']
+        else:
+            # Remove expired entry
+            del EXTRACTION_CACHE[cache_key]
+            print(f"{Colors.YELLOW}⚠ Extraction cache entry expired, removed{Colors.END}")
+    
+    print(f"{Colors.BLUE}Extraction cache MISS - will perform fresh extraction{Colors.END}")
+    return None
+
+def cache_extraction_result(
+    property_info: Dict[str, Any], 
+    address: str, 
+    city: str = None, 
+    state: str = None, 
+    zip_code: str = None
+) -> None:
+    """
+    Store property extraction results in cache with current timestamp.
+    
+    Args:
+        property_info: The PropertyInfo object to cache
+        address: Street address
+        city: City name (optional)
+        state: State abbreviation (optional)
+        zip_code: ZIP code (optional)
+    """
+    cache_key = get_cache_key(address, city, state, zip_code)
+    
+    EXTRACTION_CACHE[cache_key] = {
+        'data': property_info,
+        'timestamp': datetime.now()
+    }
+    
+    print(f"{Colors.GREEN}✓ Cached extraction results for future requests (instant response on next request){Colors.END}")
+
 def get_cache_stats() -> Dict[str, Any]:
     """
-    Get comprehensive cache statistics for monitoring.
+    Get comprehensive cache statistics for monitoring both search and extraction caches.
     
     Returns:
-        Dict with cache metrics including hit potential and expiry info
+        Dict with cache metrics including hit potential and expiry info for both caches
     """
-    total_entries = len(SEARCH_CACHE)
-    valid_entries = 0
-    expired_entries = 0
+    # Search cache stats
+    search_total = len(SEARCH_CACHE)
+    search_valid = 0
+    search_expired = 0
     
-    # Count valid vs expired entries
     for cache_entry in SEARCH_CACHE.values():
         if is_cache_valid(cache_entry):
-            valid_entries += 1
+            search_valid += 1
         else:
-            expired_entries += 1
+            search_expired += 1
+    
+    # Extraction cache stats
+    extraction_total = len(EXTRACTION_CACHE)
+    extraction_valid = 0
+    extraction_expired = 0
+    
+    for cache_entry in EXTRACTION_CACHE.values():
+        if is_cache_valid(cache_entry):
+            extraction_valid += 1
+        else:
+            extraction_expired += 1
+    
+    # Combined stats
+    total_entries = search_total + extraction_total
+    total_valid = search_valid + extraction_valid
+    total_expired = search_expired + extraction_expired
     
     # Calculate cache hit potential
-    cache_hit_potential = (valid_entries / max(1, total_entries)) * 100
+    cache_hit_potential = (total_valid / max(1, total_entries)) * 100
     
     return {
         "total_entries": total_entries,
-        "valid_entries": valid_entries, 
-        "expired_entries": expired_entries,
+        "valid_entries": total_valid, 
+        "expired_entries": total_expired,
         "cache_hit_potential": f"{cache_hit_potential:.1f}%",
         "expiry_hours": CACHE_EXPIRY_HOURS,
-        "memory_usage_kb": len(str(SEARCH_CACHE)) / 1024 if SEARCH_CACHE else 0
+        "memory_usage_kb": (len(str(SEARCH_CACHE)) + len(str(EXTRACTION_CACHE))) / 1024,
+        "search_cache": {
+            "total_entries": search_total,
+            "valid_entries": search_valid,
+            "expired_entries": search_expired
+        },
+        "extraction_cache": {
+            "total_entries": extraction_total,
+            "valid_entries": extraction_valid,
+            "expired_entries": extraction_expired
+        }
     }
 
 def clear_cache() -> Dict[str, Any]:
     """
-    Clear all cached search results.
+    Clear all cached search and extraction results.
     
     Returns:
         Dict with information about cleared entries
     """
-    global SEARCH_CACHE
+    global SEARCH_CACHE, EXTRACTION_CACHE
     
-    cache_count = len(SEARCH_CACHE)
+    search_count = len(SEARCH_CACHE)
+    extraction_count = len(EXTRACTION_CACHE)
+    total_count = search_count + extraction_count
     cache_stats = get_cache_stats()
     
     SEARCH_CACHE.clear()
+    EXTRACTION_CACHE.clear()
     
-    print(f"{Colors.CYAN}✓ Cleared {cache_count} cache entries{Colors.END}")
+    print(f"{Colors.CYAN}✓ Cleared {total_count} cache entries ({search_count} search + {extraction_count} extraction){Colors.END}")
     
     return {
-        "message": f"Cleared {cache_count} cache entries",
+        "message": f"Cleared {total_count} cache entries ({search_count} search + {extraction_count} extraction)",
         "previous_stats": cache_stats,
         "cache_entries": 0
     }
 
 def cleanup_expired_entries() -> int:
     """
-    Remove expired cache entries to free memory.
+    Remove expired cache entries from both search and extraction caches to free memory.
     
     Returns:
         Number of expired entries removed
     """
-    global SEARCH_CACHE
+    global SEARCH_CACHE, EXTRACTION_CACHE
     
-    expired_keys = []
+    # Clean up search cache
+    search_expired_keys = []
     for cache_key, cache_entry in SEARCH_CACHE.items():
         if not is_cache_valid(cache_entry):
-            expired_keys.append(cache_key)
+            search_expired_keys.append(cache_key)
     
-    for key in expired_keys:
+    for key in search_expired_keys:
         del SEARCH_CACHE[key]
     
-    if expired_keys:
-        print(f"{Colors.YELLOW}🧹 Cleaned up {len(expired_keys)} expired cache entries{Colors.END}")
+    # Clean up extraction cache
+    extraction_expired_keys = []
+    for cache_key, cache_entry in EXTRACTION_CACHE.items():
+        if not is_cache_valid(cache_entry):
+            extraction_expired_keys.append(cache_key)
     
-    return len(expired_keys)
+    for key in extraction_expired_keys:
+        del EXTRACTION_CACHE[key]
+    
+    total_expired = len(search_expired_keys) + len(extraction_expired_keys)
+    
+    if total_expired:
+        print(f"{Colors.YELLOW}🧹 Cleaned up {total_expired} expired cache entries ({len(search_expired_keys)} search + {len(extraction_expired_keys)} extraction){Colors.END}")
+    
+    return total_expired
 
 def get_cache_entry_age(address: str, city: str = None, state: str = None, zip_code: str = None) -> Optional[timedelta]:
     """
